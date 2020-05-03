@@ -1,3 +1,4 @@
 config.py
 *.iso
 *.h5
+*.csv
