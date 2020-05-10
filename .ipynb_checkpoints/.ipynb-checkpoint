@@ -1,0 +1,275 @@
+{
+ "cells": [
+  {
+   "cell_type": "markdown",
+   "metadata": {
+    "toc": true
+   },
+   "source": [
+    "<h1>Table of Contents<span class=\"tocSkip\"></span></h1>\n",
+    "<div class=\"toc\"><ul class=\"toc-item\"><li><span><a href=\"#imports\" data-toc-modified-id=\"imports-1\"><span class=\"toc-item-num\">1&nbsp;&nbsp;</span>imports</a></span></li><li><span><a href=\"#methods\" data-toc-modified-id=\"methods-2\"><span class=\"toc-item-num\">2&nbsp;&nbsp;</span>methods</a></span></li></ul></div>"
+   ]
+  },
+  {
+   "cell_type": "markdown",
+   "metadata": {},
+   "source": [
+    "## imports"
+   ]
+  },
+  {
+   "cell_type": "code",
+   "execution_count": 17,
+   "metadata": {},
+   "outputs": [],
+   "source": [
+    "import pandas as pd\n",
+    "import numpy as np\n",
+    "import pandas as pd\n",
+    "import mysql.connector\n",
+    "from tqdm import tqdm\n",
+    "import h5py\n",
+    "from sqlalchemy import types, create_engine \n",
+    "import os\n",
+    "from os import listdir\n",
+    "from os.path import isfile, join\n",
+    "import config\n",
+    "import time"
+   ]
+  },
+  {
+   "cell_type": "markdown",
+   "metadata": {},
+   "source": [
+    "## methods"
+   ]
+  },
+  {
+   "cell_type": "code",
+   "execution_count": 20,
+   "metadata": {},
+   "outputs": [],
+   "source": [
+    "def get_files_list(): # gets list of filepath strings in ~/data\n",
+    "    mypath = os.getcwd()+'/data/'\n",
+    "    files = [f for f in listdir(mypath) if isfile(join(mypath, f))]\n",
+    "    for f in files:\n",
+    "        f = mypath+f # append full path for h5py loading\n",
+    "    files = list(map(lambda f: mypath+f, files))\n",
+    "    return files \n",
+    "\n",
+    "def process_orbit(h5): # filename string. adds h5's observations to dataframe\n",
+    "    # the formatting/array shape is all uniform. thanks, NASA\n",
+    "    f = h5py.File(h5, 'r') # read file\n",
+    "    geo = f['GEOLOCATION_DATA'] # h5 Groups architecture is similar to dict\n",
+    "    sci = f['SCIENCE_DATA']\n",
+    "    # hdf.Datasets -> np.array -> flatten -> list. faster than looping through each matrix\n",
+    "    lat = list(geo['Latitude'].value.ravel())\n",
+    "    long = list(geo['Longitude'].value.ravel()) # is there a less verbose way to do this?\n",
+    "    sat_lat = list(geo['SpacecraftLatitude'].value.ravel())*36 # extend the 1d arrays\n",
+    "    sat_long = list(geo['SpacecraftLongitude'].value.ravel())*36 # don't forget to ravel like i did\n",
+    "    sat_alt = list(geo['SpacecraftAltitude'].value.ravel())*36\n",
+    "    time = list(geo['TimeUTC'].value.ravel())*36 # 36 measurements per position means one \"time\" value for every consecutive 36 measurements\n",
+    "    sza = list(geo['SolarZenithAngle'].value.ravel())\n",
+    "    pbl = list(sci['ColumnAmountSO2_PBL'].value.ravel())\n",
+    "    anom = list(sci['Flag_SAA'].value.ravel())\n",
+    "    volc = list(sci['Flag_SO2'].value.ravel())\n",
+    "    # combine lists into df\n",
+    "    new = pd.DataFrame(list(zip(lat, long, sat_lat, sat_long, sat_alt, time, sza, pbl, anom, volc)),\n",
+    "                       columns=[\"lat\", \"long\", \"sat_lat\", \"sat_long\", \n",
+    "                                'sat_alt', \"time\", \"sza\", \"pbl\", \"anom\", 'volc'])\n",
+    "    new['time'] = new['time'].astype(str) # change time format\n",
+    "    new['time'] = new['time'].apply(lambda st: st[2:12]+' '+st[13:21]) # change time format\n",
+    "    return new # returns new df\n",
+    "\n",
+    "def make_engine():\n",
+    "    user = config.user # substitute your own username, password & SQL server host\n",
+    "    pw = config.pw\n",
+    "    host = config.host\n",
+    "    db = config.db\n",
+    "    connst = f'mysql+pymysql://{user}:{pw}@{host}/{db}'\n",
+    "    engine = create_engine(connst, echo=False) # don't set pool_recycle\n",
+    "    return engine\n",
+    "\n",
+    "def process_h5s(): # filepath strings, sqlalchemy engine\n",
+    "    # loads all h5s into dataframes -> uploads to SQL\n",
+    "    # to keep track of progress\n",
+    "    files = get_files_list() # get filepath strings\n",
+    "    engine = make_engine()\n",
+    "    print(f'processing {len(files)} files...')\n",
+    "    for f in tqdm(files): # this took 18 hours for 40,000 11k-length h5 files on my laptop\n",
+    "        df = process_orbit(f)\n",
+    "        df.to_sql('so2', con=engine, if_exists='append') # sqlalchemy takes care of sessions, commits etc rather nicely\n",
+    "    return \n",
+    "\n",
+    "# def setup(): # get engine and filestring list\n",
+    "#     print('establishing engine...')\n",
+    "#     engine = make_engine() # establish connection to server\n",
+    "#     files = get_files_list() # get filepath strings\n",
+    "#     return engine, files"
+   ]
+  },
+  {
+   "cell_type": "code",
+   "execution_count": 21,
+   "metadata": {},
+   "outputs": [
+    {
+     "ename": "AttributeError",
+     "evalue": "module 'config' has no attribute 'db'",
+     "output_type": "error",
+     "traceback": [
+      "\u001b[0;31m---------------------------------------------------------------------------\u001b[0m",
+      "\u001b[0;31mAttributeError\u001b[0m                            Traceback (most recent call last)",
+      "\u001b[0;32m<ipython-input-21-d7f8e38bb423>\u001b[0m in \u001b[0;36m<module>\u001b[0;34m\u001b[0m\n\u001b[0;32m----> 1\u001b[0;31m \u001b[0mprocess_h5s\u001b[0m\u001b[0;34m(\u001b[0m\u001b[0;34m)\u001b[0m \u001b[0;31m# process each file & upload to server\u001b[0m\u001b[0;34m\u001b[0m\u001b[0;34m\u001b[0m\u001b[0m\n\u001b[0m",
+      "\u001b[0;32m<ipython-input-20-14e0cdf185d9>\u001b[0m in \u001b[0;36mprocess_h5s\u001b[0;34m()\u001b[0m\n\u001b[1;32m     44\u001b[0m     \u001b[0;31m# to keep track of progress\u001b[0m\u001b[0;34m\u001b[0m\u001b[0;34m\u001b[0m\u001b[0;34m\u001b[0m\u001b[0m\n\u001b[1;32m     45\u001b[0m     \u001b[0mfiles\u001b[0m \u001b[0;34m=\u001b[0m \u001b[0mget_files_list\u001b[0m\u001b[0;34m(\u001b[0m\u001b[0;34m)\u001b[0m \u001b[0;31m# get filepath strings\u001b[0m\u001b[0;34m\u001b[0m\u001b[0;34m\u001b[0m\u001b[0m\n\u001b[0;32m---> 46\u001b[0;31m     \u001b[0mengine\u001b[0m \u001b[0;34m=\u001b[0m \u001b[0mmake_engine\u001b[0m\u001b[0;34m(\u001b[0m\u001b[0;34m)\u001b[0m\u001b[0;34m\u001b[0m\u001b[0;34m\u001b[0m\u001b[0m\n\u001b[0m\u001b[1;32m     47\u001b[0m     \u001b[0mprint\u001b[0m\u001b[0;34m(\u001b[0m\u001b[0;34mf'processing {len(files)} files...'\u001b[0m\u001b[0;34m)\u001b[0m\u001b[0;34m\u001b[0m\u001b[0;34m\u001b[0m\u001b[0m\n\u001b[1;32m     48\u001b[0m     \u001b[0;32mfor\u001b[0m \u001b[0mf\u001b[0m \u001b[0;32min\u001b[0m \u001b[0mtqdm\u001b[0m\u001b[0;34m(\u001b[0m\u001b[0mfiles\u001b[0m\u001b[0;34m)\u001b[0m\u001b[0;34m:\u001b[0m \u001b[0;31m# this took 18 hours for 40,000 11k-length h5 files on my laptop\u001b[0m\u001b[0;34m\u001b[0m\u001b[0;34m\u001b[0m\u001b[0m\n",
+      "\u001b[0;32m<ipython-input-20-14e0cdf185d9>\u001b[0m in \u001b[0;36mmake_engine\u001b[0;34m()\u001b[0m\n\u001b[1;32m     35\u001b[0m     \u001b[0mpw\u001b[0m \u001b[0;34m=\u001b[0m \u001b[0mconfig\u001b[0m\u001b[0;34m.\u001b[0m\u001b[0mpw\u001b[0m\u001b[0;34m\u001b[0m\u001b[0;34m\u001b[0m\u001b[0m\n\u001b[1;32m     36\u001b[0m     \u001b[0mhost\u001b[0m \u001b[0;34m=\u001b[0m \u001b[0mconfig\u001b[0m\u001b[0;34m.\u001b[0m\u001b[0mhost\u001b[0m\u001b[0;34m\u001b[0m\u001b[0;34m\u001b[0m\u001b[0m\n\u001b[0;32m---> 37\u001b[0;31m     \u001b[0mdb\u001b[0m \u001b[0;34m=\u001b[0m \u001b[0mconfig\u001b[0m\u001b[0;34m.\u001b[0m\u001b[0mdb\u001b[0m\u001b[0;34m\u001b[0m\u001b[0;34m\u001b[0m\u001b[0m\n\u001b[0m\u001b[1;32m     38\u001b[0m     \u001b[0mconnst\u001b[0m \u001b[0;34m=\u001b[0m \u001b[0;34mf'mysql+pymysql://{user}:{pw}@{host}/{db}'\u001b[0m\u001b[0;34m\u001b[0m\u001b[0;34m\u001b[0m\u001b[0m\n\u001b[1;32m     39\u001b[0m     \u001b[0mengine\u001b[0m \u001b[0;34m=\u001b[0m \u001b[0mcreate_engine\u001b[0m\u001b[0;34m(\u001b[0m\u001b[0mconnst\u001b[0m\u001b[0;34m,\u001b[0m \u001b[0mecho\u001b[0m\u001b[0;34m=\u001b[0m\u001b[0;32mFalse\u001b[0m\u001b[0;34m)\u001b[0m \u001b[0;31m# don't set pool_recycle\u001b[0m\u001b[0;34m\u001b[0m\u001b[0;34m\u001b[0m\u001b[0m\n",
+      "\u001b[0;31mAttributeError\u001b[0m: module 'config' has no attribute 'db'"
+     ]
+    }
+   ],
+   "source": [
+    "\n",
+    "\n",
+    "process_h5s() # process each file & upload to server"
+   ]
+  },
+  {
+   "cell_type": "code",
+   "execution_count": null,
+   "metadata": {},
+   "outputs": [],
+   "source": []
+  },
+  {
+   "cell_type": "code",
+   "execution_count": null,
+   "metadata": {},
+   "outputs": [],
+   "source": []
+  },
+  {
+   "cell_type": "code",
+   "execution_count": null,
+   "metadata": {},
+   "outputs": [],
+   "source": []
+  },
+  {
+   "cell_type": "code",
+   "execution_count": null,
+   "metadata": {},
+   "outputs": [],
+   "source": []
+  },
+  {
+   "cell_type": "code",
+   "execution_count": null,
+   "metadata": {},
+   "outputs": [],
+   "source": []
+  },
+  {
+   "cell_type": "code",
+   "execution_count": null,
+   "metadata": {},
+   "outputs": [],
+   "source": []
+  },
+  {
+   "cell_type": "code",
+   "execution_count": null,
+   "metadata": {},
+   "outputs": [],
+   "source": []
+  },
+  {
+   "cell_type": "code",
+   "execution_count": null,
+   "metadata": {},
+   "outputs": [],
+   "source": []
+  },
+  {
+   "cell_type": "code",
+   "execution_count": null,
+   "metadata": {},
+   "outputs": [],
+   "source": []
+  },
+  {
+   "cell_type": "code",
+   "execution_count": null,
+   "metadata": {},
+   "outputs": [],
+   "source": []
+  },
+  {
+   "cell_type": "code",
+   "execution_count": null,
+   "metadata": {},
+   "outputs": [],
+   "source": []
+  },
+  {
+   "cell_type": "code",
+   "execution_count": null,
+   "metadata": {},
+   "outputs": [],
+   "source": []
+  },
+  {
+   "cell_type": "code",
+   "execution_count": null,
+   "metadata": {},
+   "outputs": [],
+   "source": []
+  },
+  {
+   "cell_type": "code",
+   "execution_count": null,
+   "metadata": {},
+   "outputs": [],
+   "source": []
+  }
+ ],
+ "metadata": {
+  "kernelspec": {
+   "display_name": "Python 3",
+   "language": "python",
+   "name": "python3"
+  },
+  "language_info": {
+   "codemirror_mode": {
+    "name": "ipython",
+    "version": 3
+   },
+   "file_extension": ".py",
+   "mimetype": "text/x-python",
+   "name": "python",
+   "nbconvert_exporter": "python",
+   "pygments_lexer": "ipython3",
+   "version": "3.7.4"
+  },
+  "toc": {
+   "base_numbering": 1,
+   "nav_menu": {},
+   "number_sections": true,
+   "sideBar": true,
+   "skip_h1_title": false,
+   "title_cell": "Table of Contents",
+   "title_sidebar": "Contents",
+   "toc_cell": true,
+   "toc_position": {
+    "height": "calc(100% - 180px)",
+    "left": "10px",
+    "top": "150px",
+    "width": "304px"
+   },
+   "toc_section_display": true,
+   "toc_window_display": true
+  }
+ },
+ "nbformat": 4,
+ "nbformat_minor": 2
+}
