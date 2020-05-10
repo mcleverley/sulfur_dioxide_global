@@ -41,15 +41,15 @@ def process_orbit(h5): # filename string. adds h5's observations to dataframe
                        columns=["lat", "long", "sat_lat", "sat_long", 
                                 'sat_alt', "time", "sza", "pbl", "anom", 'volc'])
     new['time'] = new['time'].astype(str) # change time format
-    new['time'] = new['time'].apply(lambda st: st[2:12]+' '+st[13:21]) # slice relevant parts
-    return new # returns new df with the h5's 11k rows
+    new['time'] = new['time'].apply(lambda st: st[2:12]+' '+st[13:21]) # change time format
+    return new # returns new df
 
-def make_vars(): # create connection to server
-    user = config.user # substitute your own username, password & SQL server host + db name
+def make_engine():
+    user = config.user # substitute your own username, password & SQL server host
     pw = config.pw
     host = config.host
     db = config.db
-    connst = f'mysql+pymysql://{user}:{pw}@{host}.clqqz5nrghvl.us-east-1.rds.amazonaws.com/{db}'
+    connst = f'mysql+pymysql://{user}:{pw}@{host}/{db}'
     engine = create_engine(connst, echo=False) # don't set pool_recycle
     return engine
 
@@ -61,10 +61,11 @@ def process_h5s(files, engine): # filepath strings, sqlalchemy engine
         df.to_sql('so2', con=engine, if_exists='append') # sqlalchemy takes care of sessions, commits etc rather nicely
     return 
 
+
 # ------------------------------- Run
 
 print('establishing engine...')
-engine = make_vars() # establish connection to server
+engine = make_engine() # establish connection to server
 files = get_files_list() # get filepath strings
 print(f'processing {len(files)} files...')
 process_h5s(files, engine) # process each file & upload to server
